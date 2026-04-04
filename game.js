@@ -80,6 +80,16 @@
       showToast: function (opts) {
         var t = (opts && opts.title) ? opts.title : '';
         console.log('[mock] showToast', t);
+      },
+      login: function (opts) {
+        setTimeout(function () {
+          if (opts && typeof opts.success === 'function') {
+            opts.success({ code: 'mock_pc_silent_login_code' });
+          }
+          if (opts && typeof opts.complete === 'function') {
+            opts.complete();
+          }
+        }, 0);
       }
     };
     window.addEventListener('focus', function () {
@@ -93,7 +103,7 @@
   /* TikTok docs: TTMinis.game — bridge onto tt if methods missing */
   if (typeof TTMinis !== 'undefined' && TTMinis.game && typeof tt === 'object') {
     var g = TTMinis.game;
-    ['createRewardedVideoAd', 'createInterstitialAd', 'addShortcut', 'getShortcutMissionReward', 'onShow', 'onHide', 'getSystemInfoSync', 'createCanvas', 'showToast'].forEach(function (k) {
+    ['createRewardedVideoAd', 'createInterstitialAd', 'addShortcut', 'getShortcutMissionReward', 'onShow', 'onHide', 'getSystemInfoSync', 'createCanvas', 'showToast', 'login'].forEach(function (k) {
       if (typeof tt[k] !== 'function' && typeof g[k] === 'function') tt[k] = g[k].bind(g);
     });
   }
@@ -118,6 +128,33 @@
     canvas.style.height = LOGICAL_H + 'px';
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  /**
+   * Silent login (Mini Games SDK: TTMinis.game.login / tt.login).
+   * Success returns `code` — exchange on your server for open_id per TikTok OAuth2 docs.
+   * Some hosts may also return openId / open_id; we persist when present.
+   */
+  var loginAuthCode = '';
+  var loginOpenId = '';
+
+  function runSilentLogin() {
+    if (typeof tt.login !== 'function') return;
+    tt.login({
+      success: function (result) {
+        if (!result || typeof result !== 'object') return;
+        if (typeof result.code === 'string' && result.code.length > 0) {
+          loginAuthCode = result.code;
+        }
+        var oid = result.openId != null ? result.openId : result.open_id;
+        if (typeof oid === 'string' && oid.length > 0) {
+          loginOpenId = oid;
+        }
+      },
+      fail: function () {},
+      complete: function () {}
+    });
+  }
+  runSilentLogin();
 
   function mapClientToLogical(clientX, clientY) {
     var rect = canvas.getBoundingClientRect();
