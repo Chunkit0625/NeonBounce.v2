@@ -1,51 +1,62 @@
 /**
  * Neon Bounce: Collector - TikTok Mini Game
- * Fixed: rendering issues & add to home screen guide
+ * Fixed: Full adaptive scaling for any screen size, no clipping, accurate touch mapping.
  */
 
-// ==================== Environment Detection ====================
+// ==================== Initialization ====================
+let canvas, ctx;
 const isTikTokEnv = typeof tt !== 'undefined';
 
-// ==================== Canvas Setup ====================
-let canvas, ctx;
+// 逻辑分辨率固定
+const LOGICAL_W = 750;
+const LOGICAL_H = 1334;
+
+// 物理屏幕尺寸
+let screenWidth = 0, screenHeight = 0;
+// 缩放因子和偏移量
+let scale = 1, offsetX = 0, offsetY = 0;
+
+function updateCanvasScale() {
+    if (!canvas) return;
+    // 获取实际屏幕宽高
+    if (isTikTokEnv) {
+        const sys = tt.getSystemInfoSync();
+        screenWidth = sys.windowWidth;
+        screenHeight = sys.windowHeight;
+    } else {
+        screenWidth = window.innerWidth;
+        screenHeight = window.innerHeight;
+    }
+    // 设置 canvas 物理尺寸为屏幕尺寸（像素）
+    canvas.width = screenWidth;
+    canvas.height = screenHeight;
+    
+    // 计算缩放比例（保持逻辑比例，完整显示）
+    const scaleX = screenWidth / LOGICAL_W;
+    const scaleY = screenHeight / LOGICAL_H;
+    scale = Math.min(scaleX, scaleY);  // 取较小值，保证全部内容可见
+    // 计算偏移，使内容居中
+    offsetX = (screenWidth - LOGICAL_W * scale) / 2;
+    offsetY = (screenHeight - LOGICAL_H * scale) / 2;
+    
+    // 设置绘图变换：先平移，再缩放
+    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+}
 
 if (isTikTokEnv) {
     canvas = tt.createCanvas();
     ctx = canvas.getContext('2d');
+    // TikTok 环境下，屏幕尺寸在初始化时已可获取
+    updateCanvasScale();
+    // 监听窗口变化（TikTok 可能不支持，但保留）
+    tt.onWindowResize && tt.onWindowResize(() => setTimeout(updateCanvasScale, 100));
 } else {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
+    updateCanvasScale();
+    window.addEventListener('resize', () => setTimeout(updateCanvasScale, 100));
+    window.addEventListener('orientationchange', () => setTimeout(updateCanvasScale, 100));
 }
-
-// Fixed logical resolution (750x1334)
-const LOGICAL_W = 750;
-const LOGICAL_H = 1334;
-
-// Get device pixel ratio
-let dpr = 1;
-let screenWidth = LOGICAL_W;
-let screenHeight = LOGICAL_H;
-
-if (isTikTokEnv) {
-    const sysInfo = tt.getSystemInfoSync();
-    dpr = sysInfo.pixelRatio || 1;
-    // Use screen dimensions for canvas size, but keep logical coordinates
-    screenWidth = sysInfo.windowWidth;
-    screenHeight = sysInfo.windowHeight;
-} else {
-    dpr = window.devicePixelRatio || 1;
-    screenWidth = window.innerWidth;
-    screenHeight = window.innerHeight;
-}
-
-// Set canvas actual size
-canvas.width = screenWidth * dpr;
-canvas.height = screenHeight * dpr;
-ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-// For touch coordinate conversion
-let scaleX = screenWidth / LOGICAL_W;
-let scaleY = screenHeight / LOGICAL_H;
 
 // ==================== Game Config ====================
 const CONFIG = {
@@ -350,68 +361,41 @@ function openTermsOfService() {
     }
 }
 
-// ==================== Add to Home Screen (Improved Guide) ====================
+// ==================== Add to Home Screen ====================
+function showAddShortcutGuide() {
+    tt.showModal({
+        title: 'Add to Home Screen',
+        content: '1. Tap "..." at top-right corner\n2. Scroll down and select "Add to Home Screen"\n3. Tap "Add"',
+        confirmText: 'Got it',
+        showCancel: false
+    });
+}
+
 function addToDesktop() {
     if (!isTikTokEnv) {
         alert('Please use this feature inside TikTok');
         return;
     }
-
-    // Step 1: Show informative guide
-    tt.showModal({
-        title: 'Add to Home Screen',
-        content: 'Add this game to your phone home screen for quick access and faster launch.',
-        confirmText: 'Continue',
-        cancelText: 'Later',
-        success(res) {
-            if (res.confirm) {
-                // Step 2: Call API
-                tt.addShortcut({
-                    success: () => {
-                        tt.showModal({
-                            title: 'Success!',
-                            content: 'Game shortcut has been added to your phone home screen. You can find it like a regular app.',
-                            showCancel: false
-                        });
-                    },
-                    fail: (err) => {
-                        console.log('addShortcut failed', err);
-                        // Step 3: Provide manual fallback guide
-                        tt.showModal({
-                            title: 'Manual Guide',
-                            content: '1. Tap "..." at top right corner\n2. Select "Add to Home Screen"\n3. Tap "Add" to confirm',
-                            showCancel: false
-                        });
-                    }
-                });
-            }
+    tt.addShortcut({
+        success: () => {
+            tt.showModal({ title: 'Success', content: 'Game added to your home screen!', showCancel: false });
+        },
+        fail: (err) => {
+            console.error('addShortcut failed', err);
+            showAddShortcutGuide();
         }
     });
 }
 
-// ==================== Touch Handling (Fixed Coordinate Conversion) ====================
+// ==================== Touch Handling with Coordinate Mapping ====================
 function getLogicalTouchPosition(clientX, clientY) {
-    if (!isTikTokEnv) {
-        // For web preview: use canvas bounding rect
-        const rect = canvas.getBoundingClientRect();
-        if (rect && rect.width > 0) {
-            const logicalX = (clientX - rect.left) * (LOGICAL_W / rect.width);
-            const logicalY = (clientY - rect.top) * (LOGICAL_H / rect.height);
-            return {
-                x: Math.min(LOGICAL_W, Math.max(0, logicalX)),
-                y: Math.min(LOGICAL_H, Math.max(0, logicalY))
-            };
-        }
-    }
-    // For TikTok: we assume the canvas covers the whole screen,
-    // but we need to map screen coordinates to logical coordinates.
-    // Since we set canvas size = screen size, we can map directly.
-    const logicalX = (clientX / screenWidth) * LOGICAL_W;
-    const logicalY = (clientY / screenHeight) * LOGICAL_H;
-    return {
-        x: Math.min(LOGICAL_W, Math.max(0, logicalX)),
-        y: Math.min(LOGICAL_H, Math.max(0, logicalY))
-    };
+    // 将物理屏幕坐标转换为逻辑坐标 (基于当前的缩放和偏移)
+    let logicalX = (clientX - offsetX) / scale;
+    let logicalY = (clientY - offsetY) / scale;
+    // 钳位到逻辑范围内
+    logicalX = Math.min(LOGICAL_W, Math.max(0, logicalX));
+    logicalY = Math.min(LOGICAL_H, Math.max(0, logicalY));
+    return { x: logicalX, y: logicalY };
 }
 
 function hitRect(px, py, rect) {
@@ -437,7 +421,6 @@ function handleAction(e) {
         if (hitRect(tx, ty, UI_RECTS.terms)) { openTermsOfService(); return; }
         if (hitRect(tx, ty, UI_RECTS.addShortcut)) { addToDesktop(); return; }
         if (hitRect(tx, ty, UI_RECTS.watchAd)) { showRewardedVideo(); return; }
-        // Start game
         state.mode = 'PLAYING';
         startRecording();
     } 
@@ -447,11 +430,11 @@ function handleAction(e) {
     } 
     else if (state.mode === 'GAMEOVER') {
         const reviveBtn = { x: LOGICAL_W/2 - 100, y: LOGICAL_H/2 + 70, w: 200, h: 45 };
+        const shareBtn = { x: LOGICAL_W/2 + 20, y: LOGICAL_H/2 + 70, w: 80, h: 45 };
         if (hitRect(tx, ty, reviveBtn)) {
             showRewardedVideo();
             return;
         }
-        const shareBtn = { x: LOGICAL_W/2 + 20, y: LOGICAL_H/2 + 70, w: 80, h: 45 };
         if (hitRect(tx, ty, shareBtn)) {
             shareGame();
             return;
@@ -461,7 +444,7 @@ function handleAction(e) {
     }
 }
 
-// Bind events
+// 事件绑定
 if (isTikTokEnv) {
     tt.onTouchStart(handleAction);
 } else {
@@ -470,21 +453,27 @@ if (isTikTokEnv) {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
-// ==================== Drawing ====================
+// ==================== Drawing (All within transformed context) ====================
 function draw() {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // 每次绘制前重新设置变换（防止被其他操作覆盖）
+    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+    
+    // 清空背景（覆盖整个逻辑区域）
     ctx.fillStyle = CONFIG.COLORS.bg;
     ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
 
+    // 墙壁
     ctx.fillStyle = CONFIG.COLORS.wall;
     ctx.fillRect(0, 0, CONFIG.WALL_WIDTH, LOGICAL_H);
     ctx.fillRect(LOGICAL_W - CONFIG.WALL_WIDTH, 0, CONFIG.WALL_WIDTH, LOGICAL_H);
 
+    // 应用屏幕抖动（所有后续元素都会抖动）
     if (state.shake > 0) {
         ctx.save();
         ctx.translate((Math.random() - 0.5) * state.shake, (Math.random() - 0.5) * state.shake);
     }
 
+    // 粒子
     for (let p of state.particles) {
         ctx.save();
         ctx.globalAlpha = p.alpha;
@@ -495,6 +484,7 @@ function draw() {
         ctx.restore();
     }
 
+    // 尖刺
     ctx.fillStyle = CONFIG.COLORS.spike;
     for (let s of state.spikes) {
         const x = state.side === 1 ? LOGICAL_W - CONFIG.WALL_WIDTH : CONFIG.WALL_WIDTH;
@@ -511,6 +501,7 @@ function draw() {
         ctx.fill();
     }
 
+    // 玩家
     ctx.fillStyle = CONFIG.COLORS.player;
     ctx.shadowBlur = 15;
     ctx.shadowColor = CONFIG.COLORS.player;
@@ -519,11 +510,12 @@ function draw() {
     ctx.fill();
     ctx.shadowBlur = 0;
 
+    // 文字与UI
     ctx.fillStyle = CONFIG.COLORS.text;
     ctx.textAlign = 'center';
-    ctx.font = 'bold 36px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif';
 
     if (state.mode === 'START') {
+        ctx.font = 'bold 36px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif';
         ctx.fillText('NEON BOUNCE', LOGICAL_W/2, LOGICAL_H/2 - 100);
         ctx.font = '20px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif';
         ctx.fillText('Tap to Start', LOGICAL_W/2, LOGICAL_H/2 - 20);
@@ -542,9 +534,9 @@ function draw() {
         ctx.fillStyle = '#FE2C55';
         ctx.fillRect(UI_RECTS.watchAd.x, UI_RECTS.watchAd.y, UI_RECTS.watchAd.w, UI_RECTS.watchAd.h);
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('🎬 Free Revival', UI_RECTS.watchAd.x + UI_RECTS.watchAd.w/2, UI_RECTS.watchAd.y + 27);
-
-    } else if (state.mode === 'PLAYING') {
+        ctx.fillText('▶ Free Revival', UI_RECTS.watchAd.x + UI_RECTS.watchAd.w/2, UI_RECTS.watchAd.y + 27);
+    } 
+    else if (state.mode === 'PLAYING') {
         ctx.font = 'bold 70px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif';
         ctx.globalAlpha = 0.2;
         ctx.fillText(state.score, LOGICAL_W/2, LOGICAL_H/2);
@@ -554,7 +546,8 @@ function draw() {
             ctx.font = 'bold 28px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif';
             ctx.fillText(`${state.combo}x STREAK`, LOGICAL_W/2, 100);
         }
-    } else if (state.mode === 'GAMEOVER') {
+    } 
+    else if (state.mode === 'GAMEOVER') {
         ctx.font = 'bold 45px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif';
         ctx.fillStyle = CONFIG.COLORS.spike;
         ctx.fillText('GAME OVER', LOGICAL_W/2, LOGICAL_H/2 - 80);
@@ -566,7 +559,7 @@ function draw() {
         ctx.fillRect(LOGICAL_W/2 - 100, LOGICAL_H/2 + 70, 200, 45);
         ctx.fillStyle = '#0f0e17';
         ctx.font = 'bold 18px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif';
-        ctx.fillText('🎬 Watch Ad to Revive', LOGICAL_W/2, LOGICAL_H/2 + 97);
+        ctx.fillText('▶ Watch Ad to Revive', LOGICAL_W/2, LOGICAL_H/2 + 97);
 
         ctx.fillStyle = '#25F4EE';
         ctx.fillRect(LOGICAL_W/2 + 20, LOGICAL_H/2 + 70, 80, 45);
