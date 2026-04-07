@@ -1,6 +1,6 @@
 /**
  * Neon Bounce: Collector - TikTok Mini Game
- * Fixed: enlarged UI buttons, replaced unreliable "Add to Home" with guide button.
+ * Fixed: "How to Add to Home" now shows custom toast; enlarged buttons; unified shake.
  */
 
 // ==================== Initialization ====================
@@ -78,6 +78,15 @@ const UI_RECTS = {
     addGuide:  { x: LOGICAL_W/2 - 110,   y: LOGICAL_H - 130, w: 220, h: 50 },
     watchAd:   { x: LOGICAL_W/2 - 90,    y: LOGICAL_H - 200, w: 180, h: 50 }
 };
+
+// ==================== Custom Toast (no tt.showModal) ====================
+let toastMessage = null;
+let toastTimer = 0;
+
+function showToast(msg, duration = 2500) {
+    toastMessage = msg;
+    toastTimer = duration;
+}
 
 // ==================== Helper Functions ====================
 function createBurst(x, y, color, count, speed, size) {
@@ -225,7 +234,7 @@ function shareGame() {
             fail: (err) => console.log('Share failed', err)
         });
     } else {
-        tt.showModal({ title: 'No recording', content: 'Play a round first to record your gameplay', showCancel: false });
+        showToast('Play a round first to record your gameplay', 2000);
     }
 }
 
@@ -258,7 +267,7 @@ function initRewardedVideo() {
             if (res && res.isEnded) {
                 giveAdReward();
             } else {
-                tt.showModal({ title: 'Tip', content: 'Watch the full video to get the reward', showCancel: false });
+                showToast('Watch the full video to get the reward', 2000);
             }
         });
         rewardedVideoAd.load();
@@ -271,13 +280,13 @@ function showRewardedVideo() {
         return;
     }
     if (!rewardedVideoAd) {
-        tt.showModal({ title: 'Ad not ready', content: 'Please try again later', showCancel: false });
+        showToast('Ad not ready, try again later', 2000);
         return;
     }
     rewardedVideoAd.show().catch((err) => {
         console.log('Rewarded ad show failed', err);
         rewardedVideoAd.load();
-        tt.showModal({ title: 'Ad error', content: 'Unable to play ad now, please try again', showCancel: false });
+        showToast('Unable to play ad now, please try again', 2000);
     });
 }
 
@@ -289,18 +298,14 @@ function giveAdReward() {
         state.player.vy = CONFIG.JUMP_FORCE * 1.2;
         state.shake = 10;
         createBurst(state.player.x, state.player.y, '#25F4EE', 20, 8, 5);
-        if (isTikTokEnv) {
-            tt.showModal({ title: 'Revived!', content: 'Keep bouncing!', showCancel: false });
-        }
+        showToast('Revived! Keep bouncing!', 1500);
     } else if (state.mode === 'PLAYING') {
         state.score += 10;
         state.combo++;
         state.comboTimer = 40;
         createSpikes();
         createBurst(state.player.x, state.player.y, '#ffff00', 15, 6, 4);
-        if (isTikTokEnv) {
-            tt.showModal({ title: 'Bonus!', content: '+10 points!', showCancel: false });
-        }
+        showToast('+10 points!', 1000);
     }
 }
 
@@ -351,22 +356,14 @@ function openTermsOfService() {
     }
 }
 
-// ==================== Add to Home Screen (Guide only) ====================
-function showAddToHomeGuide() {
-    tt.showModal({
-        title: 'Add to Home Screen',
-        content: '1️⃣ Tap "..." at top-right corner\n2️⃣ Scroll down and select "Add to Home Screen"\n3️⃣ Tap "Add" to install',
-        confirmText: 'Got it',
-        showCancel: false
-    });
-}
-
+// ==================== Add to Home Screen (Custom Toast Guide) ====================
 function addToDesktopGuide() {
     if (!isTikTokEnv) {
-        alert('Open this game in TikTok browser to add to home screen');
+        alert('Open this game in TikTok to add to home screen');
         return;
     }
-    showAddToHomeGuide();
+    // 显示自定义提示，不依赖 tt.showModal
+    showToast('Tap "..." → Add to Home Screen', 3000);
 }
 
 // ==================== Touch Handling with Coordinate Mapping ====================
@@ -395,6 +392,9 @@ function handleAction(e) {
     }
     const touch = getLogicalTouchPosition(clientX, clientY);
     const tx = touch.x, ty = touch.y;
+
+    // 调试日志（可移除）
+    // console.log(`Tap at (${tx.toFixed(1)}, ${ty.toFixed(1)})`);
 
     if (state.mode === 'START') {
         if (hitRect(tx, ty, UI_RECTS.privacy)) { openPrivacyPolicy(); return; }
@@ -433,7 +433,7 @@ if (isTikTokEnv) {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
-// ==================== Drawing (All within transformed context, unified shake) ====================
+// ==================== Drawing (Unified Shake + Toast) ====================
 function draw() {
     ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
     
@@ -550,6 +550,25 @@ function draw() {
         ctx.fillStyle = '#fffffe';
         ctx.fillText('Score: ' + state.score, LOGICAL_W/2, LOGICAL_H/2 + 170);
         ctx.fillText('Best: ' + state.highScore, LOGICAL_W/2, LOGICAL_H/2 + 220);
+    }
+
+    // 绘制自定义 Toast 提示框
+    if (toastMessage && toastTimer > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = '#000000';
+        ctx.shadowBlur = 0;
+        const tw = 460, th = 56;
+        const tx = LOGICAL_W/2 - tw/2;
+        const ty = LOGICAL_H - 100;
+        ctx.fillRect(tx, ty, tw, th);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '18px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(toastMessage, LOGICAL_W/2, ty + 36);
+        ctx.restore();
+        toastTimer -= 16;
+        if (toastTimer <= 0) toastMessage = null;
     }
 
     if (state.shake > 0) ctx.restore();
